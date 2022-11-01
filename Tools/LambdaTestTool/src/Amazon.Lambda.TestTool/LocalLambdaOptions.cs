@@ -12,39 +12,28 @@ namespace Amazon.Lambda.TestTool
 
         public int? Port { get; set; }
 
-        public IList<string> LambdaConfigFiles { get; set; }
+        public string DefaultAWSProfile { get; set; }
+
+        public string DefaultAWSRegion { get; set; }
+
+        public string DefaultTemplateFile { get; set; }
+
+        public IList<string> TemplateFiles { get; set; }
 
         public ILocalLambdaRuntime LambdaRuntime { get; set; }
 
-        public LambdaFunction LoadLambdaFuntion(string configFile, string functionHandler)
+        public LambdaFunction LoadLambdaFuntion(string templateFile, string functionHandler)
         {
-            var fullConfigFilePath = this.LambdaConfigFiles.FirstOrDefault(x =>
-                string.Equals(configFile, x, StringComparison.OrdinalIgnoreCase) || string.Equals(configFile, Path.GetFileName(x), StringComparison.OrdinalIgnoreCase));
-            if (fullConfigFilePath == null)
+            var fullTemplateFilePath = this.TemplateFiles.FirstOrDefault(x =>
+                string.Equals(templateFile, x, StringComparison.OrdinalIgnoreCase) || string.Equals(templateFile, Path.GetFileName(x), StringComparison.OrdinalIgnoreCase));
+            if (fullTemplateFilePath == null)
             {
-                throw new Exception($"{configFile} is not a config file for this project");
+                throw new Exception($"Failed to find template {templateFile}");
             }
 
-            var configInfo = LambdaDefaultsConfigFileParser.LoadFromFile(fullConfigFilePath);
-            return LoadLambdaFuntion(configInfo, functionHandler);
-        }
+            var functionsInfo = LambdaTemplateFileParser.LoadLambdaFunctionsInfoFromTemplate(fullTemplateFilePath);
 
-        public bool TryLoadLambdaFuntion(LambdaConfigInfo configInfo, string functionHandler, out LambdaFunction lambdaFunction)
-        {
-            lambdaFunction = null;
-            try
-            {
-                lambdaFunction = LoadLambdaFuntion(configInfo, functionHandler);
-                return true;
-            }
-            catch { }
-
-            return false;
-        }
-
-        public LambdaFunction LoadLambdaFuntion(LambdaConfigInfo configInfo, string functionHandler)
-        {
-            var functionInfo = configInfo.FunctionInfos.FirstOrDefault(x =>
+            var functionInfo = functionsInfo.FirstOrDefault(x =>
                 string.Equals(functionHandler, x.Handler, StringComparison.OrdinalIgnoreCase));
             if (functionInfo == null)
             {

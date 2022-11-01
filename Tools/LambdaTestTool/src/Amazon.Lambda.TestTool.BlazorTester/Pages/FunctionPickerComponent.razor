@@ -1,13 +1,15 @@
 ﻿@using Amazon.Lambda.TestTool.Runtime;
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 @inject LocalLambdaOptions LambdaOptions
+@inject ProtectedLocalStorage BrowserStorage
 
-<!-- Select Config File and Function Handler -->
+<!-- Select Template File and Function Handler -->
 <div class="row">
     <div class="col-sm form-group">
-        <label class="col-xs-3 control-label" for="config-file">Config File</label>
+        <label class="col-xs-3 control-label" for="config-file">Template</label>
         <div class="col-xs-5">
-            <select class="form-control" @bind="ConfigFile">
-                @foreach (var file in @LambdaOptions.LambdaConfigFiles)
+            <select class="form-control" @bind="TemplateFile">
+                @foreach (var file in @LambdaOptions.TemplateFiles)
                 {
                     <option value="@file">@System.IO.Path.GetFileName(file)</option>
                 }
@@ -54,39 +56,44 @@
 
 @code {
 
-    string _awsProfile;
-
+    string _awsProfile = "default";
     public string AWSProfile
     {
         get => this._awsProfile;
         set
         {
             this._awsProfile = value;
+            BrowserStorage.SetAsync("profile", value);
+            Console.WriteLine($"profile =  {value}");
             OnChangeAsync?.Invoke();
         }
     }
 
-    string _awsRegion;
+    string _awsRegion = "us-east-1";
     public string AWSRegion
     {
         get => this._awsRegion;
         set
         {
             this._awsRegion = value;
+            BrowserStorage.SetAsync("region", value);
+            Console.WriteLine($"region =  {value}");
             OnChangeAsync?.Invoke();
         }
     }
 
     public Func<Task> OnChangeAsync { get; set; }
 
-    private string _configFile;
-    public string ConfigFile
+    private string _templateFile;
+    public string TemplateFile
     {
-        get => this._configFile;
+        get => this._templateFile;
         set
         {
-            this._configFile = value;
-            UpdateConfigFileChange();
+            this._templateFile = value;
+            BrowserStorage.SetAsync("template", value);
+            Console.WriteLine($"template =  {value}");
+            UpdateTemplateFileChange();
 
             OnChangeAsync?.Invoke();
         }
@@ -99,6 +106,8 @@
         set
         {
             this._functionHandler = value;
+            BrowserStorage.SetAsync("function", value);
+            Console.WriteLine($"function =  {value}");
             OnChangeAsync?.Invoke();
         }
     }
@@ -108,35 +117,61 @@
 
     IList<LambdaFunction> AvailableFunctions;
 
-    protected override Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync()
     {
         AvailableAWSProfiles = this.LambdaOptions.LambdaRuntime.AWSService.ListProfiles();
 
-
-        if(LambdaOptions.LambdaConfigFiles.Count > 0)
+        if (!string.IsNullOrEmpty(LambdaOptions.DefaultAWSProfile) && this.AvailableAWSProfiles.Contains(LambdaOptions.DefaultAWSProfile))
         {
-            this.ConfigFile = LambdaOptions.LambdaConfigFiles[0];
+            this.AWSProfile = LambdaOptions.DefaultAWSProfile;
+        }
+        else
+        {
+            var profileFromBrowserStorage = await BrowserStorage.GetAsync<string>("profile");
+            if (profileFromBrowserStorage.Success && this.AvailableAWSProfiles.Contains(profileFromBrowserStorage.Value))
+                this.AWSProfile = profileFromBrowserStorage.Value;
         }
 
-        return Task.CompletedTask;
+        if (!string.IsNullOrEmpty(LambdaOptions.DefaultAWSRegion))
+        {
+            this.AWSRegion = LambdaOptions.DefaultAWSRegion;
+        }
+        else
+        {
+            var regionFromBrowserStorage = await BrowserStorage.GetAsync<string>("region");
+            if (regionFromBrowserStorage.Success)
+                this.AWSRegion = regionFromBrowserStorage.Value;
+        }
+
+        var functionFromBrowserStorage = await BrowserStorage.GetAsync<string>("function");
+        if (functionFromBrowserStorage.Success)
+            this.FunctionHandler = functionFromBrowserStorage.Value;
+
+        var defaultTemplateFile = LambdaOptions.TemplateFiles.FirstOrDefault(x =>
+            string.Equals(LambdaOptions.DefaultTemplateFile, x, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(LambdaOptions.DefaultTemplateFile, System.IO.Path.GetFileName(x), StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrEmpty(defaultTemplateFile))
+        {
+            this.TemplateFile = defaultTemplateFile;
+        }
+        else 
+        {
+            var templateFromBrowserStorage = await BrowserStorage.GetAsync<string>("template");
+            if (templateFromBrowserStorage.Success && LambdaOptions.TemplateFiles.Contains(templateFromBrowserStorage.Value))
+                this.TemplateFile = templateFromBrowserStorage.Value;
+            else if (LambdaOptions.TemplateFiles.Count > 0)
+                this.TemplateFile = LambdaOptions.TemplateFiles[0];
+        }
     }
 
-    void UpdateConfigFileChange()
+    void UpdateTemplateFileChange()
     {
-        var configInfo = LambdaDefaultsConfigFileParser.LoadFromFile(this.ConfigFile);
-        AvailableFunctions = this.LambdaOptions.LambdaRuntime.LoadLambdaFunctions(configInfo.FunctionInfos);
-        this.FunctionHandler = this.AvailableFunctions.First()?.FunctionInfo?.Handler;
+        var functionsInfo = LambdaTemplateFileParser.LoadLambdaFunctionsInfoFromTemplate(this.TemplateFile);
+        AvailableFunctions = this.LambdaOptions.LambdaRuntime.LoadLambdaFunctions(functionsInfo);
 
-
-        if (configInfo.AWSProfile != null && this.AvailableAWSProfiles.Contains(configInfo.AWSProfile))
-        {
-            this.AWSProfile = configInfo.AWSProfile;
-        }
-
-        if(!string.IsNullOrEmpty(configInfo.AWSRegion))
-        {
-            this.AWSRegion = configInfo.AWSRegion;
-        }
+        if (this.AvailableFunctions.FirstOrDefault(x => x.FunctionInfo?.Handler == this.FunctionHandler) == null)
+            this.FunctionHandler = this.AvailableFunctions.First()?.FunctionInfo?.Handler;
 
         this.StateHasChanged();
     }

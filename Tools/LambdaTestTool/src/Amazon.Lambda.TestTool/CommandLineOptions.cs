@@ -12,6 +12,8 @@ namespace Amazon.Lambda.TestTool
 
         public string Path { get; set; }
 
+        public string ProjectDir { get; set; }
+
         public bool NoUI { get; set; }
 
         public string ConfigFile { get; set; }
@@ -23,6 +25,8 @@ namespace Amazon.Lambda.TestTool
         public string AWSProfile { get; set; }
 
         public string AWSRegion { get; set; }
+
+        public string Template { get; set; }
 
         public bool ShowHelp { get; set; }
 
@@ -63,12 +67,20 @@ namespace Amazon.Lambda.TestTool
                         options.Path = GetNextStringValue(i);
                         i++;
                         break;
+                    case "--project-dir":
+                        options.ProjectDir = GetNextStringValue(i);
+                        i++;
+                        break;
                     case "--profile":
                         options.AWSProfile = GetNextStringValue(i);
                         i++;
                         break;
                     case "--region":
                         options.AWSRegion = GetNextStringValue(i);
+                        i++;
+                        break;
+                    case "--template":
+                        options.Template = GetNextStringValue(i);
                         i++;
                         break;
                     case "--no-ui":
