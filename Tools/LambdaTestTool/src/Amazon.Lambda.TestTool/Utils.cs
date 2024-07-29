@@ -131,50 +131,9 @@ namespace Amazon.Lambda.TestTool
             return FindLambdaProjectDirectory(Directory.GetParent(lambdaAssemblyDirectory)?.FullName);
         }
 
-        public static IList<string> SearchForConfigFiles(string lambdaFunctionDirectory, bool disableLogging = false)
+        public static IList<string> SearchForTemplateFiles(string lambdaFunctionDirectory)
         {
-            var configFiles = new List<string>();
-
-            // Look for JSON files that are .NET Lambda config files like aws-lambda-tools-defaults.json. The parameter
-            // lambdaFunctionDirectory will be set to the build directory so the search goes up the directory hierarchy.
-            do
-            {
-                foreach (var file in Directory.GetFiles(lambdaFunctionDirectory, "*.json", SearchOption.TopDirectoryOnly))
-                {
-                    try
-                    {
-                        var configFile = System.Text.Json.JsonSerializer.Deserialize<LambdaConfigFile>(File.ReadAllText(file), new System.Text.Json.JsonSerializerOptions
-                        {
-                            PropertyNameCaseInsensitive = true
-                        });
-                        configFile.ConfigFileLocation = file;
-
-                        if (!string.IsNullOrEmpty(configFile.DetermineHandler()))
-                        {
-                            if (!disableLogging) Console.WriteLine($"Found Lambda config file {file}");
-                            configFiles.Add(file);
-                        }
-                        else if (!string.IsNullOrEmpty(configFile.Template) && File.Exists(Path.Combine(lambdaFunctionDirectory, configFile.Template)))
-                        {
-                            var config = LambdaDefaultsConfigFileParser.LoadFromFile(configFile);
-                            if (config.FunctionInfos?.Count > 0)
-                            {
-                                if (!disableLogging) Console.WriteLine($"Found Lambda config file {file}");
-                                configFiles.Add(file);
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        if (!disableLogging) Console.WriteLine($"Error parsing JSON file: {file}");
-                    }
-                }
-
-                lambdaFunctionDirectory = Directory.GetParent(lambdaFunctionDirectory)?.FullName;
-
-            } while (lambdaFunctionDirectory != null && configFiles.Count == 0);
-
-            return configFiles;
+            return Directory.GetFiles(lambdaFunctionDirectory, "*.template", SearchOption.AllDirectories);
         }
 
 

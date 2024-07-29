@@ -3,7 +3,7 @@
   <Import Project="..\..\..\..\buildtools\common.props" />
   
   <PropertyGroup>
-    <TargetFrameworks>net6.0;net7.0;net8.0</TargetFrameworks>
+    <TargetFrameworks>net8.0</TargetFrameworks>
     <Description>Common code for the AWS .NET Core Lambda Mock Test Tool.</Description>
     <NoWarn>1701;1702;1591;1587;3021;NU5100;CS1591</NoWarn>
   </PropertyGroup>

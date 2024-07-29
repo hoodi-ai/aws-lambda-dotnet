@@ -3,8 +3,10 @@
 @using System.Threading; 
 @using Amazon.Lambda.TestTool.Runtime;
 @using Amazon.Lambda.TestTool.SampleRequests;
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 @inject LocalLambdaOptions LambdaOptions
 @inject IModalService Modal
+@inject ProtectedLocalStorage BrowserStorage
 
 <h2>@Constants.PRODUCT_NAME</h2>
 
@@ -108,6 +110,8 @@
         set
         {
             this._selectedSampleRequestName = value;
+            BrowserStorage.SetAsync("request", value);
+            Console.WriteLine($"request =  {value}");
             this.FunctionInput = SampleRequestManager.GetRequest(this._selectedSampleRequestName);
             this.StateHasChanged();
         }
@@ -115,10 +119,37 @@
 
     SampleRequestManager SampleRequestManager { get; set; }
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         this.SampleRequestManager = new SampleRequestManager(LambdaOptions.GetPreferenceDirectory(false));
         this.SampleRequests = SampleRequestManager.GetSampleRequests();
+
+        try
+        {
+            var requestFromBrowserStorage = await BrowserStorage.GetAsync<string>("request");
+            if (requestFromBrowserStorage.Success)
+            {
+                bool requestExist = false;
+                foreach (var keyValuePair in this.SampleRequests)
+                {
+                    foreach (var request in keyValuePair.Value)
+                    {
+                        if (request.Filename == requestFromBrowserStorage.Value)
+                        {
+                            requestExist = true;
+                            break;
+                        }
+                    }
+
+                    if (requestExist) 
+                        break;
+                }
+
+                if (requestExist)
+                    this.SelectedSampleRequestName = requestFromBrowserStorage.Value;
+            }
+        }
+        catch { }
     }
 
     void OnSaveRequestClick()
@@ -159,7 +190,7 @@
 
         var ts = new ThreadStart(() =>
         {
-            var function = this.LambdaOptions.LoadLambdaFuntion(FunctionPicker.ConfigFile, FunctionPicker.FunctionHandler);
+            var function = this.LambdaOptions.LoadLambdaFuntion(FunctionPicker.TemplateFile, FunctionPicker.FunctionHandler);
 
             var request = new ExecutionRequest()
             {
