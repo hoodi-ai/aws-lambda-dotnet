@@ -282,3 +282,47 @@ app {
     overflow-y: scroll;
     height: 400px;
 }
+
+.sc-wrapper { position: relative; }
+.sc-input-row { position: relative; display: flex; align-items: center; }
+.sc-input {
+    width: 100%;
+    padding: 6px 28px 6px 12px;
+    font-size: 14px;
+    height: auto;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+    line-height: 1.42857;
+    color: #555;
+    transition: border-color .15s ease-in-out, box-shadow .15s ease-in-out;
+}
+.sc-input:focus { border-color: #66afe9; outline: none; box-shadow: 0 0 4px rgba(102,175,233,.6); }
+.sc-clear {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; font-size: 16px; color: #aaa;
+    cursor: pointer; line-height: 1; padding: 2px 4px;
+    border-radius: 50%; transition: color .15s, background .15s;
+}
+.sc-clear:hover { color: #333; background: rgba(0,0,0,.06); }
+.sc-panel {
+    display: none; position: absolute; z-index: 9999;
+    top: 100%; left: 0; right: 0; margin-top: 2px;
+    max-height: 260px; overflow-y: auto;
+    background: #fff; border: 1px solid #ccc;
+    border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.15);
+}
+.sc-item {
+    padding: 7px 12px; cursor: pointer; font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: background .1s;
+}
+.sc-item:hover, .sc-item-active { background: #f0f4ff; }
+.sc-item-selected { font-weight: 600; color: #0366d6; }
+.sc-group-header {
+    padding: 8px 12px 4px; font-size: 11px; font-weight: 700;
+    color: #6a737d; text-transform: uppercase; letter-spacing: .5px;
+    background: #fafbfc; border-top: 1px solid #eee;
+}
+.sc-empty { padding: 12px; text-align: center; color: #999; font-size: 13px; font-style: italic; }
+.sc-match { font-weight: 700; color: #0366d6; }
