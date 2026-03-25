@@ -143,7 +143,7 @@
         this.ErrorMessage = null;
         try
         {
-            var function = this.LambdaOptions.LoadLambdaFuntion(FunctionPicker.ConfigFile, FunctionPicker.FunctionHandler);
+            var function = this.LambdaOptions.LoadLambdaFuntion(FunctionPicker.TemplateFile, FunctionPicker.FunctionHandler);
             _dlqMonitor = new DlqMonitor(this.LambdaOptions.LambdaRuntime, function, FunctionPicker.AWSProfile, FunctionPicker.AWSRegion, SelectedQueueUrl);
             _dlqMonitor.Start();
             IsRunning = true;
