@@ -28,16 +28,17 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
     /// <summary>
     /// Loads user code and prepares to invoke it.
     /// </summary>
-#if NET8_0_OR_GREATER
     [System.Diagnostics.CodeAnalysis.RequiresUnreferencedCode("UserCodeLoader does not support trimming and is meant to be used in class library based Lambda functions.")]
-#endif
     internal class UserCodeLoader
     {
         private const string UserInvokeException = "An exception occurred while invoking customer handler.";
         private const string LambdaLoggingActionFieldName = "_loggingAction";
+        private const string LambdaLoggingWithLevelActionFieldName = "_loggingWithLevelAction";
+        private const string LambdaLoggingWithLevelAndExceptionActionFieldName = "_loggingWithLevelAndExceptionAction";
 
         internal const string LambdaCoreAssemblyName = "Amazon.Lambda.Core";
 
+        private readonly IEnvironmentVariables _environmentVariables;
         private readonly InternalLogger _logger;
         private readonly string _handlerString;
         private bool _customerLoggerSetUpComplete;
@@ -46,16 +47,30 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
         internal MethodInfo CustomerMethodInfo { get; private set; }
 
         /// <summary>
+        /// The serializer instance constructed from the customer's
+        /// <c>[LambdaSerializer(typeof(...))]</c> attribute (if any). Populated by
+        /// <see cref="Init"/>. Typed as <see cref="object"/> here because the value is
+        /// produced via reflection in <see cref="GetSerializerObject"/> and validated
+        /// against the loaded <c>ILambdaSerializer</c> interface there;
+        /// <see cref="RuntimeSupportInitializer"/> casts it back to <c>ILambdaSerializer</c>
+        /// before handing it to <see cref="LambdaBootstrap.SetSerializer"/>.
+        /// </summary>
+        internal object CustomerSerializerInstance { get; private set; }
+
+        /// <summary>
         /// Initializes UserCodeLoader with a given handler and internal logger.
         /// </summary>
+        /// <param name="environmentVariables"></param>
         /// <param name="handler"></param>
         /// <param name="logger"></param>
-        public UserCodeLoader(string handler, InternalLogger logger)
+        public UserCodeLoader(IEnvironmentVariables environmentVariables, string handler, InternalLogger logger)
         {
             if (string.IsNullOrEmpty(handler))
             {
                 throw new ArgumentNullException(nameof(handler));
             }
+
+            _environmentVariables = environmentVariables;
 
             _logger = logger;
             _handlerString = handler;
@@ -125,9 +140,10 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
             var customerObject = GetCustomerObject(customerType);
 
             var customerSerializerInstance = GetSerializerObject(customerAssembly);
+            CustomerSerializerInstance = customerSerializerInstance;
             _logger.LogDebug($"UCL : Constructing invoke delegate");
 
-            var isPreJit = UserCodeInit.IsCallPreJit();
+            var isPreJit = UserCodeInit.IsCallPreJit(_environmentVariables);
             var builder = new InvokeDelegateBuilder(_logger, _handler, CustomerMethodInfo);
             _invokeDelegate = builder.ConstructInvokeDelegate(customerObject, customerSerializerInstance, isPreJit);
             if (isPreJit)
@@ -148,6 +164,13 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
             _invokeDelegate(lambdaData, lambdaContext, outStream);
         }
 
+        /// <summary>
+        /// Sets the backing logger action field in Amazon.Logging.Core to redirect logs into Amazon.Lambda.RuntimeSupport.
+        /// </summary>
+        /// <param name="coreAssembly"></param>
+        /// <param name="customerLoggingAction"></param>
+        /// <param name="internalLogger"></param>
+        /// <exception cref="ArgumentNullException"></exception>
         internal static void SetCustomerLoggerLogAction(Assembly coreAssembly, Action<string> customerLoggingAction, InternalLogger internalLogger)
         {
             if (coreAssembly == null)
@@ -187,6 +210,97 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
         }
 
         /// <summary>
+        /// Sets the backing logger action field in Amazon.Logging.Core to redirect logs into Amazon.Lambda.RuntimeSupport.
+        /// </summary>
+        /// <param name="coreAssembly"></param>
+        /// <param name="loggingWithLevelAction"></param>
+        /// <param name="internalLogger"></param>
+        /// <exception cref="ArgumentNullException"></exception>
+
+        internal static void SetCustomerLoggerLogAction(Assembly coreAssembly, Action<string, string, object[]> loggingWithLevelAction, InternalLogger internalLogger)
+        {
+            if (coreAssembly == null)
+            {
+                throw new ArgumentNullException(nameof(coreAssembly));
+            }
+
+            if (loggingWithLevelAction == null)
+            {
+                throw new ArgumentNullException(nameof(loggingWithLevelAction));
+            }
+
+            internalLogger.LogDebug($"UCL : Retrieving type '{Types.LambdaLoggerTypeName}'");
+            var lambdaILoggerType = coreAssembly.GetType(Types.LambdaLoggerTypeName);
+            if (lambdaILoggerType == null)
+            {
+                throw LambdaExceptions.ValidationException(Errors.UserCodeLoader.Internal.UnableToLocateType, Types.LambdaLoggerTypeName);
+            }
+
+            internalLogger.LogDebug($"UCL : Retrieving field '{LambdaLoggingWithLevelActionFieldName}'");
+            var loggingActionField = lambdaILoggerType.GetTypeInfo().GetField(LambdaLoggingWithLevelActionFieldName, BindingFlags.NonPublic | BindingFlags.Static);
+            if (loggingActionField == null)
+            {
+                throw LambdaExceptions.ValidationException(Errors.UserCodeLoader.Internal.UnableToRetrieveField, LambdaLoggingWithLevelActionFieldName, Types.LambdaLoggerTypeName);
+            }
+
+            internalLogger.LogDebug($"UCL : Setting field '{LambdaLoggingWithLevelActionFieldName}'");
+            try
+            {
+                loggingActionField.SetValue(null, loggingWithLevelAction);
+            }
+            catch (Exception e)
+            {
+                throw LambdaExceptions.ValidationException(e, Errors.UserCodeLoader.Internal.UnableToSetField,
+                    Types.LambdaLoggerTypeName, LambdaLoggingWithLevelActionFieldName);
+            }
+        }
+
+        /// <summary>
+        /// Sets the backing logger action field in Amazon.Logging.Core to redirect logs into Amazon.Lambda.RuntimeSupport.
+        /// </summary>
+        /// <param name="coreAssembly"></param>
+        /// <param name="loggingWithAndExceptionLevelAction"></param>
+        /// <param name="internalLogger"></param>
+        /// <exception cref="ArgumentNullException"></exception>
+        internal static void SetCustomerLoggerLogAction(Assembly coreAssembly, Action<string, Exception, string, object[]> loggingWithAndExceptionLevelAction, InternalLogger internalLogger)
+        {
+            if (coreAssembly == null)
+            {
+                throw new ArgumentNullException(nameof(coreAssembly));
+            }
+
+            if (loggingWithAndExceptionLevelAction == null)
+            {
+                throw new ArgumentNullException(nameof(loggingWithAndExceptionLevelAction));
+            }
+
+            internalLogger.LogDebug($"UCL : Retrieving type '{Types.LambdaLoggerTypeName}'");
+            var lambdaILoggerType = coreAssembly.GetType(Types.LambdaLoggerTypeName);
+            if (lambdaILoggerType == null)
+            {
+                throw LambdaExceptions.ValidationException(Errors.UserCodeLoader.Internal.UnableToLocateType, Types.LambdaLoggerTypeName);
+            }
+
+            internalLogger.LogDebug($"UCL : Retrieving field '{LambdaLoggingWithLevelAndExceptionActionFieldName}'");
+            var loggingActionField = lambdaILoggerType.GetTypeInfo().GetField(LambdaLoggingWithLevelAndExceptionActionFieldName, BindingFlags.NonPublic | BindingFlags.Static);
+            if (loggingActionField == null)
+            {
+                throw LambdaExceptions.ValidationException(Errors.UserCodeLoader.Internal.UnableToRetrieveField, LambdaLoggingWithLevelAndExceptionActionFieldName, Types.LambdaLoggerTypeName);
+            }
+
+            internalLogger.LogDebug($"UCL : Setting field '{LambdaLoggingWithLevelAndExceptionActionFieldName}'");
+            try
+            {
+                loggingActionField.SetValue(null, loggingWithAndExceptionLevelAction);
+            }
+            catch (Exception e)
+            {
+                throw LambdaExceptions.ValidationException(e, Errors.UserCodeLoader.Internal.UnableToSetField,
+                    Types.LambdaLoggerTypeName, LambdaLoggingWithLevelAndExceptionActionFieldName);
+            }
+        }
+
+        /// <summary>
         /// Constructs customer-specified serializer, specified either on the method,
         /// the assembly, or not specified at all.
         /// Returns null if serializer not specified.
@@ -196,7 +310,7 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
         private object GetSerializerObject(Assembly customerAssembly)
         {
             // try looking up the LambdaSerializerAttribute on the method
-            _logger.LogDebug($"UCL : Searching for LambdaSerializerAttribute at method level");
+            _logger.LogDebug("UCL : Searching for LambdaSerializerAttribute at method level");
             var customerSerializerAttribute = CustomerMethodInfo.GetCustomAttributes().SingleOrDefault(a => Types.IsLambdaSerializerAttribute(a.GetType()));
 
             _logger.LogDebug($"UCL : LambdaSerializerAttribute at method level {(customerSerializerAttribute != null ? "found" : "not found")}");
@@ -204,7 +318,7 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
             // only check the assembly if the LambdaSerializerAttribute does not exist on the method
             if (customerSerializerAttribute == null)
             {
-                _logger.LogDebug($"UCL : Searching for LambdaSerializerAttribute at assembly level");
+                _logger.LogDebug("UCL : Searching for LambdaSerializerAttribute at assembly level");
                 customerSerializerAttribute = customerAssembly.GetCustomAttributes()
                     .SingleOrDefault(a => Types.IsLambdaSerializerAttribute(a.GetType()));
                 _logger.LogDebug($"UCL : LambdaSerializerAttribute at assembly level {(customerSerializerAttribute != null ? "found" : "not found")}");
@@ -215,7 +329,7 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
 
             if (serializerAttributeExists)
             {
-                _logger.LogDebug($"UCL : Constructing custom serializer");
+                _logger.LogDebug("UCL : Constructing custom serializer");
                 return ConstructCustomSerializer(customerSerializerAttribute);
             }
             else
@@ -335,7 +449,6 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
         /// <param name="serializerAttribute">Serializer attribute used to define the input/output serializer.</param>
         /// <returns></returns>
         /// <exception cref="LambdaValidationException">Thrown when serializer doesn't satisfy serializer type requirements.</exception>
-        /// <exception cref="LambdaUserCodeException">Thrown when failed to instantiate serializer type.</exception>
         private object ConstructCustomSerializer(Attribute serializerAttribute)
         {
             var attributeType = serializerAttribute.GetType();
@@ -387,7 +500,6 @@ namespace Amazon.Lambda.RuntimeSupport.Bootstrap
         /// </summary>
         /// <param name="customerType">Type of the customer handler container.</param>
         /// <returns>Instance of customer handler container type</returns>
-        /// <exception cref="LambdaUserCodeException">Thrown when failed to instantiate customer type.</exception>
         private object GetCustomerObject(Type customerType)
         {
             _logger.LogDebug($"UCL : Validating type '{_handler.TypeName}'");

@@ -1,4 +1,4 @@
-﻿using Amazon.Lambda.TestTool.Runtime;
+using Amazon.Lambda.TestTool.Runtime;
 using Amazon.Lambda.TestTool.SampleRequests;
 using System;
 using System.Diagnostics;
@@ -69,6 +69,10 @@ namespace Amazon.Lambda.TestTool
                 var targetFramework = "net7.0";
 #elif NET8_0
                 var targetFramework = "net8.0";
+#elif NET9_0
+                var targetFramework = "net9.0";
+#elif NET10_0
+                var targetFramework = "net10.0";
 #endif
 
                 // If running in the project directory select the build directory so the deps.json file can be found.

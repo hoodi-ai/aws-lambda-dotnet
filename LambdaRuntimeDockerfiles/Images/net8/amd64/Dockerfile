@@ -1,14 +1,14 @@
 # Based on Docker image from: https://github.com/dotnet/dotnet-docker/
 
-ARG ASPNET_VERSION=8.0.7
-ARG ASPNET_SHA512=c7479dc008fce77c2bfcaa1ac1c9fe6f64ef7e59609fff6707da14975aade73e3cb22b97f2b3922a2642fa8d843a3caf714ab3a2b357abeda486b9d0f8bebb18
+ARG ASPNET_VERSION=8.0.27
+ARG ASPNET_SHA512=4f948af91423636c8a8bbd9ad2f9e2b5997b84e84ef36707e3e3250eeb4f00d0bc98ed1442151d1913ba21bb0475ba2adb2d6d6328a93dbe7105f2c0bca2abc9
 
 ARG LAMBDA_RUNTIME_NAME=dotnet8
 ARG AMAZON_LINUX=public.ecr.aws/lambda/provided:al2023
 
 FROM $AMAZON_LINUX AS base
 
-RUN dnf install libicu-67.1-7.amzn2023.0.3.x86_64 --assumeyes
+RUN dnf install libicu-67.1-7.amzn2023.0.4.x86_64 --assumeyes
 
 FROM base AS builder-net8
 ARG ASPNET_VERSION
@@ -20,7 +20,7 @@ WORKDIR /dotnet
 RUN dnf install tar gzip --assumeyes
 
 # Install the ASP.NET Core shared framework
-RUN curl -SL --output aspnetcore.tar.gz https://dotnetcli.azureedge.net/dotnet/aspnetcore/Runtime/$ASPNET_VERSION/aspnetcore-runtime-$ASPNET_VERSION-linux-x64.tar.gz \
+RUN curl -SL --output aspnetcore.tar.gz https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/$ASPNET_VERSION/aspnetcore-runtime-$ASPNET_VERSION-linux-x64.tar.gz \
     && aspnetcore_sha512=$ASPNET_SHA512 \
     && echo "$aspnetcore_sha512  aspnetcore.tar.gz" | sha512sum -c - \
     && tar -ozxf aspnetcore.tar.gz -C /dotnet \
@@ -30,18 +30,20 @@ RUN curl -SL --output aspnetcore.tar.gz https://dotnetcli.azureedge.net/dotnet/a
 FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS builder
 WORKDIR /src
 COPY ["Libraries/src/Amazon.Lambda.RuntimeSupport", "Repo/Libraries/src/Amazon.Lambda.RuntimeSupport/"]
+COPY ["Libraries/src/SnapshotRestore.Registry", "Repo/Libraries/src/SnapshotRestore.Registry/"]
 COPY ["Libraries/src/Amazon.Lambda.Core", "Repo/Libraries/src/Amazon.Lambda.Core/"]
+COPY ["Libraries/src/SnapshotRestore.Registry", "Repo/Libraries/src/SnapshotRestore.Registry/"]
 COPY ["buildtools/", "Repo/buildtools/"]
 RUN dotnet restore "Repo/Libraries/src/Amazon.Lambda.RuntimeSupport/Amazon.Lambda.RuntimeSupport.csproj" /p:TargetFrameworks=net8.0
-WORKDIR "Repo/Libraries/src/Amazon.Lambda.RuntimeSupport"
+WORKDIR /src/Repo/Libraries/src/Amazon.Lambda.RuntimeSupport
 RUN dotnet build "Amazon.Lambda.RuntimeSupport.csproj" /p:ExecutableOutputType=true /p:GenerateDocumentationFile=false /p:TargetFrameworks=net8.0 --runtime linux-x64 -c Release -o /app/build
 
 
 FROM builder AS publish
 RUN dotnet publish "Amazon.Lambda.RuntimeSupport.csproj" /p:ExecutableOutputType=true /p:GenerateDocumentationFile=false /p:TargetFrameworks=net8.0 -f net8.0 --runtime linux-x64 --self-contained false -p:PublishReadyToRun=true -c Release -o /app/publish
 RUN apt-get update && apt-get install -y dos2unix
-RUN dos2unix /app/publish/bootstrap-al2023.sh && \
-    mv /app/publish/bootstrap-al2023.sh /app/publish/bootstrap && \
+RUN dos2unix /app/publish/bootstrap.net8.sh && \
+    mv /app/publish/bootstrap.net8.sh /app/publish/bootstrap && \
     chmod +x /app/publish/bootstrap
 RUN touch /app/publish/empty-certificates.crt
 

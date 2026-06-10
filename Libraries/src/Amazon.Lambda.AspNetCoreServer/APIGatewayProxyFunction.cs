@@ -1,10 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Security.Claims;
 using System.Text;
 
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
@@ -104,6 +105,49 @@ namespace Amazon.Lambda.AspNetCoreServer
             apiGatewayResponse.MultiValueHeaders["ErrorType"] = new List<string> { ex.GetType().Name };
         }
 
+        /// <summary>
+        /// Builds an <see cref="Amazon.Lambda.Core.ResponseStreaming.HttpResponseStreamPrelude"/> from the current
+        /// ASP.NET Core response feature. The status code defaults to 200 when <see cref="IHttpResponseFeature.StatusCode"/>
+        /// is 0. <c>Set-Cookie</c> header values are moved to <see cref="Amazon.Lambda.Core.ResponseStreaming.HttpResponseStreamPrelude.Cookies"/>;
+        /// all other headers are placed in <see cref="Amazon.Lambda.Core.ResponseStreaming.HttpResponseStreamPrelude.MultiValueHeaders"/>.
+        /// </summary>
+        /// <param name="responseFeature">The ASP.NET Core response feature for the current invocation.</param>
+        /// <returns>A populated <see cref="Amazon.Lambda.Core.ResponseStreaming.HttpResponseStreamPrelude"/>.</returns>
+        [System.Runtime.Versioning.RequiresPreviewFeatures(ParameterizedPreviewMessage)]
+        protected override Amazon.Lambda.Core.ResponseStreaming.HttpResponseStreamPrelude BuildStreamingPrelude(IHttpResponseFeature responseFeature)
+        {
+            var prelude = new Amazon.Lambda.Core.ResponseStreaming.HttpResponseStreamPrelude
+            {
+                StatusCode = (System.Net.HttpStatusCode)(responseFeature.StatusCode != 0 ? responseFeature.StatusCode : 200)
+            };
+
+            foreach (var kvp in responseFeature.Headers)
+            {
+                // Skip hop-by-hop and framing headers that are meaningless for streaming
+                // responses. Content-Length conflicts with chunked transfer encoding and
+                // can cause API Gateway to reject the response with a 502.
+                if (string.Equals(kvp.Key, "Content-Length", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(kvp.Key, "Transfer-Encoding", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (string.Equals(kvp.Key, "Set-Cookie", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var value in kvp.Value)
+                    {
+                        prelude.Cookies.Add(value);
+                    }
+                }
+                else
+                {
+                    prelude.MultiValueHeaders[kvp.Key] = kvp.Value.ToArray();
+                }
+            }
+
+            return prelude;
+        }
+
 
         /// <summary>
         /// Convert the JSON document received from API Gateway into the InvokeFeatures object.
@@ -151,33 +195,9 @@ namespace Amazon.Lambda.AspNetCoreServer
             {
                 var requestFeatures = (IHttpRequestFeature)features;
                 requestFeatures.Scheme = "https";
-                requestFeatures.Method = apiGatewayRequest.HttpMethod;
+                requestFeatures.Method = this.ParseHttpMethod(apiGatewayRequest);
 
-                string path = null;
-
-                // Replaces {proxy+} in path, if exists
-                if (apiGatewayRequest.PathParameters != null && apiGatewayRequest.PathParameters.TryGetValue("proxy", out var proxy) &&
-                    !string.IsNullOrEmpty(apiGatewayRequest.Resource))
-                {
-                    var proxyPath = proxy;
-                    path = apiGatewayRequest.Resource.Replace("{proxy+}", proxyPath);
-
-                    // Adds all the rest of non greedy parameters in apiGateway.Resource to the path
-                    foreach (var pathParameter in apiGatewayRequest.PathParameters.Where(pp => pp.Key != "proxy"))
-                    {
-                        path = path.Replace($"{{{pathParameter.Key}}}", pathParameter.Value);
-                    }
-                }
- 
-                if (string.IsNullOrEmpty(path))
-                {
-                    path = apiGatewayRequest.Path;
-                }
-
-                if (!path.StartsWith("/"))
-                {
-                    path = "/" + path;
-                }
+                string path = this.ParseHttpPath(apiGatewayRequest);
 
                 var rawQueryString = Utilities.CreateQueryStringParameters(
                     apiGatewayRequest.QueryStringParameters, apiGatewayRequest.MultiValueQueryStringParameters, true);
@@ -214,13 +234,7 @@ namespace Amazon.Lambda.AspNetCoreServer
 
                 Utilities.SetHeadersCollection(requestFeatures.Headers, apiGatewayRequest.Headers, apiGatewayRequest.MultiValueHeaders);
 
-                if (!requestFeatures.Headers.ContainsKey("Host"))
-                {
-                    var apiId = apiGatewayRequest?.RequestContext?.ApiId ?? "";
-                    var stage = apiGatewayRequest?.RequestContext?.Stage ?? "";
-
-                    requestFeatures.Headers["Host"] = $"apigateway-{apiId}-{stage}";
-                }
+                requestFeatures.Headers = this.AddMissingRequestHeaders(apiGatewayRequest, requestFeatures.Headers);
 
 
                 if (!string.IsNullOrEmpty(apiGatewayRequest.Body))
@@ -256,6 +270,7 @@ namespace Amazon.Lambda.AspNetCoreServer
                 {
                     connectionFeatures.RemotePort = int.Parse(forwardedPort, CultureInfo.InvariantCulture);
                 }
+                connectionFeatures.ConnectionId = apiGatewayRequest.RequestContext?.ConnectionId;
 
                 // Call consumers customize method in case they want to change how API Gateway's request
                 // was marshalled into ASP.NET Core request.
@@ -316,6 +331,8 @@ namespace Amazon.Lambda.AspNetCoreServer
                 response.MultiValueHeaders["Content-Type"] = new List<string>() { null };
             }
 
+// Disabled in case the user's ASP.NET Core application is still using the older API that set the body on the response feature instead of the new API that sets the body on the HttpResponse object.
+#pragma warning disable CS0618
             if (responseFeatures.Body != null)
             {
                 // Figure out how we should treat the response content, check encoding first to see if body is compressed, then check content type
@@ -328,12 +345,74 @@ namespace Amazon.Lambda.AspNetCoreServer
                 (response.Body, response.IsBase64Encoded) = Utilities.ConvertAspNetCoreBodyToLambdaBody(responseFeatures.Body, rcEncoding);
 
             }
-
+#pragma warning restore CS0618
             PostMarshallResponseFeature(responseFeatures, response, lambdaContext);
 
             _logger.LogDebug($"Response Base 64 Encoded: {response.IsBase64Encoded}");
 
             return response;
+        }
+
+        /// <summary>
+        /// Determines the path that should be assigned to <see cref="IHttpRequestFeature.Path"/> for this request.
+        /// The default implementation honors <c>{proxy+}</c> resource templates and falls back to <see cref="APIGatewayProxyRequest.Path"/>.
+        /// Subclasses can override to derive the path from a different source (e.g. websocket route keys).
+        /// </summary>
+        protected virtual string ParseHttpPath(APIGatewayProxyRequest apiGatewayRequest)
+        {
+            string path = null;
+
+            // Replaces {proxy+} in path, if exists
+            if (apiGatewayRequest.PathParameters != null && apiGatewayRequest.PathParameters.TryGetValue("proxy", out var proxy) &&
+                !string.IsNullOrEmpty(apiGatewayRequest.Resource))
+            {
+                var proxyPath = proxy;
+                path = apiGatewayRequest.Resource.Replace("{proxy+}", proxyPath);
+
+                // Adds all the rest of non greedy parameters in apiGateway.Resource to the path
+                foreach (var pathParameter in apiGatewayRequest.PathParameters.Where(pp => pp.Key != "proxy"))
+                {
+                    path = path.Replace($"{{{pathParameter.Key}}}", pathParameter.Value);
+                }
+            }
+
+            if (string.IsNullOrEmpty(path))
+            {
+                path = apiGatewayRequest.Path;
+            }
+
+            if (!path.StartsWith("/"))
+            {
+                path = "/" + path;
+            }
+            return path;
+        }
+
+        /// <summary>
+        /// Determines the HTTP method that should be assigned to <see cref="IHttpRequestFeature.Method"/>.
+        /// The default returns <see cref="APIGatewayProxyRequest.HttpMethod"/>; subclasses can override to force
+        /// a fixed method (e.g. websocket events are always exposed as POST).
+        /// </summary>
+        protected virtual string ParseHttpMethod(APIGatewayProxyRequest apiGatewayRequest)
+        {
+            return apiGatewayRequest.HttpMethod;
+        }
+
+        /// <summary>
+        /// Adds any headers that API Gateway did not include but ASP.NET Core needs in order to route or bind the request.
+        /// The default implementation adds a synthesized <c>Host</c> header. Subclasses can override to add additional defaults
+        /// (e.g. a default <c>Content-Type</c> for websocket payloads).
+        /// </summary>
+        protected virtual IHeaderDictionary AddMissingRequestHeaders(APIGatewayProxyRequest apiGatewayRequest, IHeaderDictionary headers)
+        {
+            if (!headers.ContainsKey("Host"))
+            {
+                var apiId = apiGatewayRequest?.RequestContext?.ApiId ?? "";
+                var stage = apiGatewayRequest?.RequestContext?.Stage ?? "";
+
+                headers["Host"] = $"apigateway-{apiId}-{stage}";
+            }
+            return headers;
         }
     }
 }

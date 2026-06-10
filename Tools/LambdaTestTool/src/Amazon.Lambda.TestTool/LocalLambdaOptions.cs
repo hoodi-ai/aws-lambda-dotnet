@@ -1,4 +1,4 @@
-﻿using Amazon.Lambda.TestTool.Runtime;
+using Amazon.Lambda.TestTool.Runtime;
 using System;
 using System.Collections.Generic;
 using System.IO;

@@ -17,11 +17,11 @@ If you are using Visual Studio Code on Windows as your IDE, you need to ensure i
 configured for PowerShell Core. To learn how to configure Visual Studio Code for 
 PowerShell Core, see the following: https://learn.microsoft.com/en-us/powershell/scripting/dev-cross-plat/vscode/using-vscode?view=powershell-7.4
 
-Next, we need to install the .NET 8 SDK. Because PowerShell Core is built on top of 
-.NET Core, the Lambda support for PowerShell uses the same .NET 8 Lambda runtime for 
-both .NET Core and PowerShell based Lambda functions. The .NET 8 SDK is used by 
+Next, we need to install the .NET 10 SDK. Because PowerShell Core is built on top of 
+.NET Core, the Lambda support for PowerShell uses the same .NET 10 Lambda runtime for 
+both .NET Core and PowerShell based Lambda functions. The .NET 10 SDK is used by 
 the new PowerShell publishing cmdlets for Lambda to create the Lambda deployment 
-package. You can find the .NET 8 SDK [here]( https://www.microsoft.com/net/download). Be 
+package. You can find the .NET 10 SDK [here]( https://www.microsoft.com/net/download). Be 
 sure to install the SDK, not the runtime installation.
 
 The last component we need for the development environment is the 
@@ -41,6 +41,25 @@ New-AWSPowerShellLambda|Used to create an initial PowerShell script that is base
 Publish-AWSPowerShellLambda|Publishes a given PowerShell script to Lambda.
 New-AWSPowerShellLambdaPackage|Creates the Lambda deployment package that can be used in a CI/CD system for deployment.
 
+## Troubleshooting
+### Enabling Debug output
+In PowerShell, [Write-Debug](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/write-debug) CmdLet could be used to write debug message to the console. However, by default, debug messages are not displayed in the console, but you can display them by using the **Debug** parameter or the **$DebugPreference** variable.
+
+The default value of [DebugPreference](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_preference_variables#debugpreference) variable is `SilentlyContinue`, which means the debug message isn't displayed and execution continues without interruption. The `-Debug` parameter could be used to override the `$DebugPreference` value.
+
+Enabling output of `Write-Debug` to CloudWatch logs is a 2 step process:
+- In PowerShell Lambda script, 
+  - Either need to set `$DebugPreference = "Continue"` at the beginning of script. Thereafter use `Write-Debug` to output debug messages ; **OR**
+  - Include `-Debug` parameter while executing `Write-Debug` (e.g.` Write-Debug "Testing Lambda PowerShell Write-Debug" -Debug`).
+- At Lambda function level, set the value of `AWS_LAMBDA_HANDLER_LOG_LEVEL` environment variable with value `DEBUG`. This would enable debug logs at Lambda level. This environment variable could be set:
+  - Either manually in Lambda function configuration in AWS console; **OR**
+  - While executing CmdLet `Publish-AWSPowerShellLambda`, passing parameter `-EnvironmentVariable @{'AWS_LAMBDA_HANDLER_LOG_LEVEL'='DEBUG'}`.
+  
+  The value of the `AWS_LAMBDA_HANDLER_LOG_LEVEL` environment variable is set to the values of the [LogLevel](https://github.com/aws/aws-lambda-dotnet/blob/master/Libraries/src/Amazon.Lambda.Core/ILambdaLogger.cs#L7) enum.
+
+The role assigned to Lambda function should have permissions to write to CloudWatch logs. 
+
+
 # Learning Resources
 
 [Lambda Developer Guide](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)
@@ -52,27 +71,6 @@ New-AWSPowerShellLambdaPackage|Creates the Lambda deployment package that can be
 * [Announcing Lambda Support for PowerShell Core](https://aws.amazon.com/blogs/developer/announcing-lambda-support-for-powershell-core/)
 * [Deploying PowerShell-based Lambda with AWS CloudFormation](https://aws.amazon.com/blogs/developer/deploying-powershell-based-lambda-with-aws-cloudformation/)
 * [Creating a PowerShell REST API](https://aws.amazon.com/blogs/developer/creating-a-powershell-rest-api/)
-
-### Community Posts
-
-* [AWS Lambda and PowerShell](https://www.yobyot.com/aws/lambda-powershell/2018/09/13/) - By Alex Neihaus 
-    * Intro post for responding to S3 Events with PowerShell.
-* [Creating a PowerShell Lambda-backed Custom Resource for AWS CloudFormation](https://ferrell.io/2018/09/17/powershell-lambda-fun/) - By Nate Ferrell
-* [Writing PowerShell Core AWS Lambda Functions – Part I](http://www.powershell.amsterdam/2018/09/26/writing-powershell-core-aws-lambda-functions-part-i/) - By Tim Pringle
-    * A series creating an Amazon Lex bot connected to Facebook powered by PowerShell Lambda. 
-    * Part 1 sets up the Facebook app.
-* [Writing PowerShell Core AWS Lambda Functions – Part II](http://www.powershell.amsterdam/2018/10/02/powershell-core-aws-lambda-functions-part-ii/) - By Tim Pringle
-    * Part 2 sets up the dev environment and explain each of the available PowerShell Lambda cmdlets from the AWSLambdaPSCore module.
-* [Writing PowerShell Core AWS Lambda Functions – Part III](https://www.powershell.amsterdam/2018/10/08/powershell-core-aws-lambda-functions-part-iii/) - By Tim Pringle
-    * Part 3 sets up the Lex 'bot, Messenger component, and introduces the event data that the PowerShell Lambda function will process.
-* [Writing PowerShell Core AWS Lambda Functions - Part IV](https://www.powershell.amsterdam/2018/10/16/powershell-core-aws-lambda-functions-part-iv/) - By Tim Pringle
-	* Part 4 walksthrough writing the entire PowerShell Lambda function and testing it locally.
-* [Writing PowerShell Core AWS Lambda Functions - Part V](https://www.powershell.amsterdam/2018/10/22/powershell-core-aws-lambda-functions-part-v/) - By Tim Pringle
-	* Part 5 concludes the series with the packaging and publishing of the PowerShell Lambda function to AWS and shows it in operation from Facebook. 
-* [AWS Lambda and PowerShell](https://4sysops.com/archives/aws-lambda-with-powershell/) - By Graham Beer
-    * Building Environment to create PowerShell AWS lambda's. Example of shutting down instances via tagging. 
-* [Automate the posts on Twitter using a AWS Lambda function and PowerShell](https://blog.victorsilva.com.uy/aws-lambda-powershell-twitter/) - By Victor Silva
-    * A way to send automated blog post on Twitter without “human” interaction using PowerShell AWS Lambda´s.
 
 ### AWS Recorded Talks
 * [Unleash your PowerShell with AWS Lambda and Serverless Computing](https://www.youtube.com/watch?v=-CmIrrEYtLA) - PowerShell and DevOps Global Summit 2019 by Andrew Pearce

@@ -8,7 +8,7 @@ using Newtonsoft.Json.Serialization;
 namespace Amazon.Lambda.Serialization.Json
 {
     /// <summary>
-    /// Custom ILambdaSerializer implementation which uses Newtonsoft.Json 9.0.1
+    /// Custom ILambdaSerializer implementation which uses Newtonsoft.Json 
     /// for serialization.
     /// 
     /// <para>
@@ -41,8 +41,8 @@ namespace Amazon.Lambda.Serialization.Json
         public JsonSerializer(Action<JsonSerializerSettings> customizeSerializerSettings, NamingStrategy namingStrategy)
         {
             JsonSerializerSettings settings = new JsonSerializerSettings();
+            settings.NullValueHandling = NullValueHandling.Ignore;
             customizeSerializerSettings(settings);
-
             
             // Set the contract resolver *after* the custom callback has been 
             // invoked. This makes sure that we always use the good resolver.
@@ -57,7 +57,7 @@ namespace Amazon.Lambda.Serialization.Json
 
             if (string.Equals(Environment.GetEnvironmentVariable(DEBUG_ENVIRONMENT_VARIABLE_NAME), "true", StringComparison.OrdinalIgnoreCase))
             {
-                this.debug = true;
+                debug = true;
             }
         }
 
@@ -94,7 +94,7 @@ namespace Amazon.Lambda.Serialization.Json
         {
             try
             {
-                if (debug)
+                if (debug && response != null)
                 {
                     using (StringWriter debugWriter = new StringWriter())
                     {

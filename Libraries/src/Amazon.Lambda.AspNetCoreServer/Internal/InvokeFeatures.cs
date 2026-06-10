@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -28,13 +28,9 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
                              IServiceProvidersFeature,
                              ITlsConnectionFeature,
                              IHttpRequestIdentifierFeature,
-
                              IHttpResponseBodyFeature
-
-#if NET6_0_OR_GREATER
                             ,IHttpRequestBodyDetectionFeature
                             ,IHttpActivityFeature
-#endif
     /*
     ,
                          IHttpUpgradeFeature,
@@ -54,11 +50,8 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
             this[typeof(ITlsConnectionFeature)] = this;
             this[typeof(IHttpResponseBodyFeature)] = this;
             this[typeof(IHttpRequestIdentifierFeature)] = this;
-
-#if NET6_0_OR_GREATER
             this[typeof(IHttpRequestBodyDetectionFeature)] = this;
             this[typeof(IHttpActivityFeature)] = this;
-#endif
         }
 
         #region IFeatureCollection
@@ -119,20 +112,21 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
 
         public IEnumerator<KeyValuePair<Type, object>> GetEnumerator()
         {
-            return this._features.GetEnumerator();
+            return _features.GetEnumerator();
         }
 
         public void Set<TFeature>(TFeature instance)
         {
-            if (instance == null)
-                return;
-
-            this._features[typeof(TFeature)] = instance;
+            // Delegate to the indexer so _containerRevision is bumped, otherwise
+            // ASP.NET Core's FeatureReferences cache will return stale feature
+            // references after middleware (e.g. OutputCache, ResponseCompression)
+            // wraps the response body via HttpContext.Response.Body = wrapper.
+            this[typeof(TFeature)] = instance;
         }
 
         IEnumerator IEnumerable.GetEnumerator()
         {
-            return this._features.GetEnumerator();
+            return _features.GetEnumerator();
         }
 
 #endregion
@@ -180,10 +174,8 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
             set;
         }
 
-        bool IHttpResponseFeature.HasStarted
-        {
-            get;
-        }
+        bool _hasStarted;
+        bool IHttpResponseFeature.HasStarted => _hasStarted;
 
         IHeaderDictionary IHttpResponseFeature.Headers
         {
@@ -201,27 +193,27 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
         void IHttpResponseFeature.OnStarting(Func<object, Task> callback, object state)
         {
             if (ResponseStartingEvents == null)
-                this.ResponseStartingEvents = new EventCallbacks();
+                ResponseStartingEvents = new EventCallbacks();
 
-            this.ResponseStartingEvents.Add(callback, state);
+            ResponseStartingEvents.Add(callback, state);
         }
 
         internal EventCallbacks ResponseCompletedEvents { get; private set; }
         void IHttpResponseFeature.OnCompleted(Func<object, Task> callback, object state)
         {
-            if (this.ResponseCompletedEvents == null)
-                this.ResponseCompletedEvents = new EventCallbacks();
+            if (ResponseCompletedEvents == null)
+                ResponseCompletedEvents = new EventCallbacks();
 
-            this.ResponseCompletedEvents.Add(callback, state);
+            ResponseCompletedEvents.Add(callback, state);
         }
 
         internal class EventCallbacks
         {
-            List<EventCallback> _callbacks = new List<EventCallback>();
+            readonly List<EventCallback> _callbacks = new List<EventCallback>();
 
             internal void Add(Func<object, Task> callback, object state)
             {
-                this._callbacks.Add(new EventCallback(callback, state));
+                _callbacks.Add(new EventCallback(callback, state));
             }
 
             internal async Task ExecuteAsync()
@@ -236,8 +228,8 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
             {
                 internal EventCallback(Func<object, Task> callback, object state)
                 {
-                    this.Callback = callback;
-                    this.State = state;
+                    Callback = callback;
+                    State = state;
                 }
 
                 Func<object, Task> Callback { get; }
@@ -245,7 +237,7 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
 
                 internal Task ExecuteAsync()
                 {
-                    var task = Callback(this.State);
+                    var task = Callback(State);
                     return task;
                 }
             }
@@ -254,7 +246,10 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
         #endregion
 
         #region IHttpResponseBodyFeature
+// Disabled in case the user's ASP.NET Core application is still using the older API that set the body on the response feature instead of the new API that sets the body on the HttpResponse object.
+#pragma warning disable CS0618
         Stream IHttpResponseBodyFeature.Stream => ((IHttpResponseFeature)this).Body;
+#pragma warning restore CS0618
 
         private PipeWriter _pipeWriter;
 
@@ -320,6 +315,7 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
 
         Task IHttpResponseBodyFeature.StartAsync(CancellationToken cancellationToken)
         {
+            _hasStarted = true;
             return Task.CompletedTask;
         }
         #endregion
@@ -381,22 +377,20 @@ namespace Amazon.Lambda.AspNetCoreServer.Internal
                 _traceIdentifier = (new Microsoft.AspNetCore.Http.Features.HttpRequestIdentifierFeature()).TraceIdentifier;
                 return _traceIdentifier;
             }
-            set { this._traceIdentifier = value; }
+            set { _traceIdentifier = value; }
         }
 
         #endregion
 
-#if NET6_0_OR_GREATER
         bool IHttpRequestBodyDetectionFeature.CanHaveBody
         {
             get
             {
                 var requestFeature = (IHttpRequestFeature)this;
-                return requestFeature.Body != null;
+                return requestFeature.Body != null && requestFeature.Body.Length > 0;
             }
         }
 
         Activity IHttpActivityFeature.Activity { get; set; }
-#endif
     }
 }
