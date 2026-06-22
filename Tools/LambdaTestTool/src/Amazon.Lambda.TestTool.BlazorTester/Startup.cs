@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.FileProviders;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -78,7 +79,27 @@ namespace Amazon.Lambda.TestTool.BlazorTester
             app.UseDeveloperExceptionPage();
 
             app.MapControllers();
-            app.UseStaticFiles();
+
+            // Configure static file serving to work with embedded resources in Release builds
+            var wwwrootPath = Path.Combine(contentPath, "wwwroot");
+            IFileProvider fileProvider;
+
+            if (Directory.Exists(wwwrootPath))
+            {
+                // Use physical files if wwwroot directory exists (Debug mode or when files are copied)
+                fileProvider = new PhysicalFileProvider(wwwrootPath);
+            }
+            else
+            {
+                // Fall back to embedded resources (Release builds where files are embedded)
+                fileProvider = new ManifestEmbeddedFileProvider(typeof(Startup).Assembly, "wwwroot");
+            }
+
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = fileProvider
+            });
+
             app.MapRazorComponents<App>()
                 .AddInteractiveServerRenderMode();
 
@@ -180,7 +201,26 @@ namespace Amazon.Lambda.TestTool.BlazorTester
         {
             app.UseDeveloperExceptionPage();
 
-            app.UseStaticFiles();
+            // Configure static file serving to work with embedded resources in Release builds
+            var contentPath = env.ContentRootPath;
+            var wwwrootPath = Path.Combine(contentPath, "wwwroot");
+            IFileProvider fileProvider;
+
+            if (Directory.Exists(wwwrootPath))
+            {
+                // Use physical files if wwwroot directory exists (Debug mode or when files are copied)
+                fileProvider = new PhysicalFileProvider(wwwrootPath);
+            }
+            else
+            {
+                // Fall back to embedded resources (Release builds where files are embedded)
+                fileProvider = new ManifestEmbeddedFileProvider(typeof(Startup).Assembly, "wwwroot");
+            }
+
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = fileProvider
+            });
 
             app.UseRouting();
 
