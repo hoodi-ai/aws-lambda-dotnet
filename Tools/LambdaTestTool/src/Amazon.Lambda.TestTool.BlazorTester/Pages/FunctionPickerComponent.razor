@@ -183,7 +183,9 @@
     void UpdateTemplateFileChange()
     {
         var functionsInfo = LambdaTemplateFileParser.LoadLambdaFunctionsInfoFromTemplate(this.TemplateFile);
-        AvailableFunctions = this.LambdaOptions.LambdaRuntime.LoadLambdaFunctions(functionsInfo);
+        AvailableFunctions = this.LambdaOptions.LambdaRuntime.LoadLambdaFunctions(functionsInfo)
+            .OrderBy(function => function.FunctionInfo.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         if (this.AvailableFunctions.FirstOrDefault(x => x.FunctionInfo?.Handler == this.FunctionHandler) == null)
             this.FunctionHandler = this.AvailableFunctions.First()?.FunctionInfo?.Handler;
